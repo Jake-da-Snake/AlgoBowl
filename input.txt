@@ -1,0 +1,15 @@
+14
+8 8
+...WW##.
+.bWbb.pW
+.Wb#bbaW
+.W.a#c.#
+bW.b.bp#
+W.b#cb.W
+#Hbbb#bW
+#W##WbW.
+1
+1 6 4 6
+
+
+
