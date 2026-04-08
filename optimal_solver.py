@@ -2,36 +2,19 @@
 AlgoBOWL: Enclose Horse — Optimal Solver
 =========================================
 
-Core insight: reframe the problem as "which region should the horse be enclosed in?"
-
-A region R is valid when:
-  - It contains the horse
-  - Its boundary (passable tiles adjacent to R but not in R) contains ONLY grass tiles
-    (since only grass tiles can have walls placed on them)
-  - len(boundary) <= wall budget
-  - No tile in R is a perimeter tile (horse can't reach the edge)
-
-KEY RULE FROM SPEC: Walls can only go on grass (.) tiles.
-  - Apple, bee, cherry, portal tiles CANNOT have walls.
-  - Therefore: if a non-wallable passable tile is adjacent to the region,
-    it MUST be included in the region (horse can reach it — nothing can block it).
-  - This means non-wallable tiles flood into the region automatically.
-
-We grow candidate regions using beam search, returning the best valid enclosure.
-
 Usage:
-    python optimal_solver.py input.txt           # solve
-    python optimal_solver.py input.txt out.txt   # verify existing output
-    python optimal_solver.py --check input.txt   # check input validity only
+    python optimal_solver.py input.txt              # solve one file
+    python optimal_solver.py inputs.zip             # solve all .txt files in zip
+    python optimal_solver.py input.txt output.txt   # verify an output
+    python optimal_solver.py --check input.txt      # check input validity only
+
+Output files are written alongside inputs as <name>_solution.txt
 """
 
-import os
-import sys
-import time
-import zipfile
+import sys, time, zipfile, os
 from collections import deque
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+# ── Tile constants ────────────────────────────────────────────────────────────
 WATER  = '#'
 GRASS  = '.'
 HORSE  = 'H'
@@ -41,16 +24,24 @@ BEES   = 'b'
 CHERRY = 'c'
 PORTAL = 'p'
 
-PASSABLE     = {GRASS, HORSE, APPLE, BEES, CHERRY, PORTAL}
-MUST_INCLUDE = {HORSE, APPLE, BEES, CHERRY, PORTAL}  # can't place walls on these
+# Tiles the horse can move through
+PASSABLE = {GRASS, HORSE, APPLE, BEES, CHERRY, PORTAL, WALL}
+
+# These cannot have new walls placed on them → flood into region automatically
+# (WALL is excluded: pre-placed walls are passable but go to boundary, not auto-flood)
+MUST_INCLUDE = {HORSE, APPLE, BEES, CHERRY, PORTAL}
+
+# Tiles that form the enclosure boundary (can be walled or opened)
+BOUNDARY_TYPES = {GRASS, WALL}
 
 TILE_SCORE = {
-    GRASS: 1, HORSE: 1, APPLE: 11, BEES: -4, CHERRY: 4, PORTAL: 1,
+    GRASS: 1, HORSE: 1, APPLE: 11, BEES: -4, CHERRY: 4, PORTAL: 1, WALL: 0,
 }
 
 DIRS = [(-1,0),(1,0),(0,-1),(0,1)]
 
-# ── Input / output ────────────────────────────────────────────────────────────
+
+# ── Parsing ───────────────────────────────────────────────────────────────────
 
 def parse_input(text):
     lines = [l.rstrip('\n') for l in text.strip().splitlines()]
@@ -73,24 +64,28 @@ def find_horse(grid, R, C):
         for c in range(C):
             if grid[r][c] == HORSE:
                 return r, c
-    raise ValueError("No horse (H) in grid")
+    raise ValueError("No horse (H) found in grid")
 
 def score_region(region, grid):
-    return sum(TILE_SCORE.get(grid[r][c], 0) for r, c in region)
+    # Pre-placed walls in the region become grass in the solution — score as 1
+    return sum(
+        TILE_SCORE.get(GRASS if grid[r][c]==WALL else grid[r][c], 0)
+        for r, c in region
+    )
+
 
 # ── Region primitives ─────────────────────────────────────────────────────────
 
-def flood_non_wallable(seeds, region, boundary, grid, R, C, portals):
+def flood_must_include(seeds, region, boundary, grid, R, C, portals):
     """
-    From newly added tiles in `seeds`, flood all MUST_INCLUDE neighbors
-    into region automatically (they can't be walled), and add GRASS
-    neighbors to boundary.
+    From newly added seeds, flood MUST_INCLUDE neighbours automatically.
+    GRASS and WALL neighbours go to boundary (they need explicit walls or expansion).
     Modifies region and boundary in place.
     """
     queue = deque(seeds)
     while queue:
         r, c = queue.popleft()
-        # Portal: destination also floods in
+        # Portal: paired destination floods in automatically
         if grid[r][c] == PORTAL and (r, c) in portals:
             pr, pc = portals[(r, c)]
             if (pr, pc) not in region:
@@ -105,55 +100,61 @@ def flood_non_wallable(seeds, region, boundary, grid, R, C, portals):
                 continue
             tile = grid[nr][nc]
             if tile in MUST_INCLUDE:
+                # Non-wallable: must join region
                 region.add((nr, nc))
                 queue.append((nr, nc))
-            elif tile == GRASS:
+            elif tile in BOUNDARY_TYPES:
+                # Grass or pre-placed wall: goes to boundary (costs 1 wall each)
                 boundary.add((nr, nc))
-            # WATER / WALL: impassable, skip
+            # Water / other: impassable, ignored
 
 
 def initial_state(hr, hc, grid, R, C, portals):
-    """Build starting state from horse position."""
+    """Build starting (region, boundary) from horse position."""
     region = {(hr, hc)}
     boundary = set()
-    flood_non_wallable([(hr, hc)], region, boundary, grid, R, C, portals)
+    flood_must_include([(hr, hc)], region, boundary, grid, R, C, portals)
     return frozenset(region), frozenset(boundary)
 
 
-def expand(region, boundary, grass_tile, grid, R, C, portals):
+def expand(region, boundary, tile, grid, R, C, portals):
     """
-    Open up a GRASS boundary tile (don't wall it — include it in the region).
-    Non-wallable tiles adjacent to it flood in automatically.
+    Open boundary tile `tile` (include it in region instead of walling it).
+    MUST_INCLUDE neighbours of the new tile flood in automatically.
+    New grass/wall neighbours go to boundary.
     Returns (new_region, new_boundary) as frozensets.
     """
     new_region = set(region)
     new_boundary = set(boundary)
-    new_region.add(grass_tile)
-    new_boundary.discard(grass_tile)
-    flood_non_wallable([grass_tile], new_region, new_boundary, grid, R, C, portals)
+    new_region.add(tile)
+    new_boundary.discard(tile)
+    flood_must_include([tile], new_region, new_boundary, grid, R, C, portals)
     return frozenset(new_region), frozenset(new_boundary)
 
 
-# ── Validity ──────────────────────────────────────────────────────────────────
+# ── Validity and scoring ──────────────────────────────────────────────────────
 
 def is_valid(region, boundary, budget, R, C):
+    """
+    Valid enclosure:
+    1. Total boundary cost ≤ budget
+       (each boundary tile, whether grass or pre-placed wall, needs 1 wall)
+    2. No region tile on the perimeter (horse can't reach grid edge)
+    """
     if len(boundary) > budget:
         return False
-    # Horse must not be able to reach any perimeter tile
     return not any(r == 0 or r == R-1 or c == 0 or c == C-1 for r, c in region)
 
 
 # ── Beam search ───────────────────────────────────────────────────────────────
 
 def beam_search(budget, R, C, grid, portals,
-                beam_width=400,
-                tile_sort_key=None,
-                time_limit=10.0,
-                start_time=None):
+                beam_width=500, tile_sort_key=None,
+                time_limit=8.0, start_time=None):
     """
-    Beam search over enclosed regions.
-    At each step, expand one boundary grass tile into the region.
-    Track and return the best valid enclosure found at any point.
+    Grow enclosed regions one boundary tile at a time.
+    Never expand perimeter grass/wall tiles (they must remain as walls).
+    Track and return the best valid enclosure found.
     """
     if start_time is None:
         start_time = time.time()
@@ -184,7 +185,13 @@ def beam_search(budget, R, C, grid, portals,
         next_candidates = []
 
         for region, boundary in beam:
-            tiles = list(boundary)
+            # Only expand non-perimeter boundary tiles
+            # (perimeter tiles must stay as walls)
+            tiles = [
+                t for t in boundary
+                if not (t[0] == 0 or t[0] == R-1 or t[1] == 0 or t[1] == C-1)
+            ]
+
             if tile_sort_key is not None:
                 tiles.sort(
                     key=lambda t: tile_sort_key(t[0], t[1], grid, region, boundary, budget, R, C),
@@ -198,15 +205,15 @@ def beam_search(budget, R, C, grid, portals,
                 seen.add(new_region)
                 record(new_region, new_boundary)
 
-                b  = len(new_boundary)
+                b = len(new_boundary)
                 on_edge = any(r2==0 or r2==R-1 or c2==0 or c2==C-1 for r2,c2 in new_region)
-                s  = score_region(new_region, grid)
+                s = score_region(new_region, grid)
 
                 if b <= budget and not on_edge:
-                    pri = (2, s, budget - b)
+                    pri = (2, s, budget - b)  # valid: rank by score
                 else:
                     excess = max(0, b - budget) + (20 if on_edge else 0)
-                    pri = (1, s - excess * 5, -b)
+                    pri = (1, s - excess * 5, -b)  # invalid: penalize
 
                 next_candidates.append((pri, new_region, new_boundary))
 
@@ -222,10 +229,11 @@ def beam_search(budget, R, C, grid, portals,
 # ── Multi-strategy solver ─────────────────────────────────────────────────────
 
 def solve(budget, R, C, grid, portals, time_limit=20.0, verbose=True):
-    """Run 4 beam search strategies, return best result."""
+    """
+    Run 4 beam search strategies. Return best region and score found.
+    """
     start = time.time()
     per   = time_limit / 4
-
     best_score = None
     best_region = None
 
@@ -237,47 +245,46 @@ def solve(budget, R, C, grid, portals, time_limit=20.0, verbose=True):
             if verbose:
                 print(f"    [{label}] score: {score}")
 
-    # 1. Score-greedy: chase highest-value tiles first
+    # Strategy 1: Score-greedy — chase apples/cherries first
     if verbose: print("  Strategy 1: score-greedy...")
     def score_key(r, c, grid, region, boundary, budget, R, C):
         return TILE_SCORE.get(grid[r][c], 0) * 10
-    update(*beam_search(budget, R, C, grid, portals, beam_width=300,
+    update(*beam_search(budget, R, C, grid, portals, beam_width=400,
                         tile_sort_key=score_key, time_limit=per, start_time=start),
            "score-greedy")
 
-    # 2. Efficiency: score per unit boundary
+    # Strategy 2: Efficiency — prefer tiles that don't grow boundary much
     if verbose: print("  Strategy 2: efficiency-greedy...")
     def eff_key(r, c, grid, region, boundary, budget, R, C):
         in_nbrs = sum(1 for dr,dc in DIRS if (r+dr,c+dc) in region)
-        return TILE_SCORE.get(grid[r][c], 0) + in_nbrs * 4
-    update(*beam_search(budget, R, C, grid, portals, beam_width=300,
+        new_exp = sum(
+            1 for dr,dc in DIRS
+            if 0<=r+dr<R and 0<=c+dc<C
+            and (r+dr,c+dc) not in region and (r+dr,c+dc) not in boundary
+            and grid[r+dr][c+dc] in BOUNDARY_TYPES
+        )
+        return TILE_SCORE.get(grid[r][c], 0) * 3 + in_nbrs * 4 - new_exp * 2
+    update(*beam_search(budget, R, C, grid, portals, beam_width=400,
                         tile_sort_key=eff_key, time_limit=per, start_time=time.time()),
            "efficiency-greedy")
 
-    # 3. Compact: minimize net boundary growth
-    if verbose: print("  Strategy 3: boundary-minimizer...")
+    # Strategy 3: Compact — minimise boundary growth (tight enclosures)
+    if verbose: print("  Strategy 3: compact...")
     def compact_key(r, c, grid, region, boundary, budget, R, C):
         in_nbrs = sum(1 for dr,dc in DIRS if (r+dr,c+dc) in region)
-        new_exp  = sum(
-            1 for dr,dc in DIRS
-            if 0<=r+dr<R and 0<=c+dc<C
-            and (r+dr,c+dc) not in region
-            and (r+dr,c+dc) not in boundary
-            and grid[r+dr][c+dc] == GRASS
-        )
-        return in_nbrs * 3 - new_exp * 2
-    update(*beam_search(budget, R, C, grid, portals, beam_width=300,
+        return in_nbrs * 5 + TILE_SCORE.get(grid[r][c], 0)
+    update(*beam_search(budget, R, C, grid, portals, beam_width=400,
                         tile_sort_key=compact_key, time_limit=per, start_time=time.time()),
-           "boundary-minimizer")
+           "compact")
 
-    # 4. Wide unordered beam
+    # Strategy 4: Wide beam — broad unordered exploration
     if verbose: print("  Strategy 4: wide-beam...")
-    update(*beam_search(budget, R, C, grid, portals, beam_width=700,
+    update(*beam_search(budget, R, C, grid, portals, beam_width=800,
                         tile_sort_key=None, time_limit=per, start_time=time.time()),
            "wide-beam")
 
     if verbose:
-        print(f"  Done in {time.time()-start:.2f}s. Best score: {best_score}")
+        print(f"  Done in {time.time()-start:.1f}s | best score: {best_score}")
 
     return best_region, best_score
 
@@ -286,34 +293,51 @@ def solve(budget, R, C, grid, portals, time_limit=20.0, verbose=True):
 
 def region_to_grid(best_region, orig_grid, R, C):
     """
-    Build solution grid: start from the original grid, keep all existing walls
-    unless they lie inside the chosen region, and wall every GRASS tile adjacent
-    to the region but not in it.
+    Build the solution grid from an enclosed region.
+
+    Rules:
+      - Tiles in region that were W → become '.' (pre-placed wall removed/opened)
+      - Grass tiles adjacent to region → become 'W' (new wall placed)
+      - Pre-placed walls adjacent to region → stay 'W' (natural wall kept)
+      - Pre-placed walls NOT adjacent to region → become '.' (removed to free budget)
+      - Everything else: unchanged
     """
     sol = [list(row) for row in orig_grid]
     region_set = set(best_region)
 
-    # Any existing wall inside the reachable region must be removed.
+    # 1. Open pre-placed walls that ended up inside the region
     for (r, c) in region_set:
         if orig_grid[r][c] == WALL:
             sol[r][c] = GRASS
 
-    # Any grass tile adjacent to the region but not in it becomes a wall.
+    # 2. Wall grass tiles adjacent to region
     for r in range(R):
         for c in range(C):
-            if (r, c) not in region_set and sol[r][c] == GRASS:
-                if any((r + dr, c + dc) in region_set for dr, dc in DIRS
-                       if 0 <= r + dr < R and 0 <= c + dc < C):
+            if (r, c) not in region_set and orig_grid[r][c] == GRASS:
+                if any(0<=r+dr<R and 0<=c+dc<C and (r+dr,c+dc) in region_set
+                       for dr,dc in DIRS):
                     sol[r][c] = WALL
+
+    # 3. Remove pre-placed walls not adjacent to region
+    #    (they consume budget without serving the enclosure)
+    for r in range(R):
+        for c in range(C):
+            if (r, c) not in region_set and orig_grid[r][c] == WALL:
+                adj = any(0<=r+dr<R and 0<=c+dc<C and (r+dr,c+dc) in region_set
+                          for dr,dc in DIRS)
+                if not adj:
+                    sol[r][c] = GRASS  # remove unnecessary pre-placed wall
 
     return sol
 
 
-# ── Verifier ──────────────────────────────────────────────────────────────────
+# ── Full reachability check (for verify) ─────────────────────────────────────
 
 def full_reachable(grid, R, C, portals, hr, hc):
+    """BFS from horse through passable tiles. Returns (reachable_set, hits_perimeter)."""
+    passable = {GRASS, HORSE, APPLE, BEES, CHERRY, PORTAL}  # W is a wall in final grid
     visited = set()
-    queue   = deque([(hr, hc)])
+    queue = deque([(hr, hc)])
     visited.add((hr, hc))
     perimeter = False
     while queue:
@@ -322,191 +346,187 @@ def full_reachable(grid, R, C, portals, hr, hc):
             perimeter = True
         if grid[r][c] == PORTAL and (r,c) in portals:
             pr, pc = portals[(r,c)]
-            if (pr,pc) not in visited and grid[pr][pc] in PASSABLE:
+            if (pr,pc) not in visited and grid[pr][pc] in passable:
                 visited.add((pr,pc)); queue.append((pr,pc))
         for dr,dc in DIRS:
             nr,nc = r+dr,c+dc
-            if 0<=nr<R and 0<=nc<C and (nr,nc) not in visited and grid[nr][nc] in PASSABLE:
+            if 0<=nr<R and 0<=nc<C and (nr,nc) not in visited and grid[nr][nc] in passable:
                 visited.add((nr,nc)); queue.append((nr,nc))
     return visited, perimeter
 
 
-def verify(budget, R, C, orig_grid, portals, sol_grid, claimed_score):
+# ── Verifier ──────────────────────────────────────────────────────────────────
+
+def verify(budget, R, C, orig_grid, portals, sol_grid, claimed_score, verbose=True):
+    """
+    Verify solution grid against spec. Returns list of error strings.
+    Valid solutions: empty list.
+
+    Wall count = ALL 'W' tiles in the solution (pre-placed kept + new).
+    """
     errors = []
-    hr, hc = find_horse(sol_grid, R, C)
-    walls_used = sum(
-        1 for r in range(R) for c in range(C)
-        if sol_grid[r][c] == WALL
-    )
-    if walls_used > budget:
-        errors.append(f"FAIL: used {walls_used} walls, budget is {budget}")
+
+    # Total walls in solution (spec: total W tiles ≤ budget)
+    total_walls = sum(sol_grid[r][c] == WALL for r in range(R) for c in range(C))
+    if total_walls > budget:
+        errors.append(f"FAIL: {total_walls} total walls in solution, budget is {budget}")
+
+    # No wall placed on illegal tile (apple/bee/cherry/portal in ORIGINAL)
+    illegal = {APPLE, BEES, CHERRY, PORTAL}
     for r in range(R):
         for c in range(C):
-            if sol_grid[r][c]==WALL and orig_grid[r][c] not in {GRASS, WALL}:
-                errors.append(f"FAIL: wall on non-grass '{orig_grid[r][c]}' at ({r},{c})")
+            if sol_grid[r][c] == WALL and orig_grid[r][c] in illegal:
+                errors.append(f"FAIL: wall on '{orig_grid[r][c]}' at ({r},{c})")
+
+    # Horse still present
+    try:
+        hr, hc = find_horse(sol_grid, R, C)
+    except ValueError:
+        errors.append("FAIL: horse missing from solution")
+        return errors
+
+    # Horse enclosed (cannot reach perimeter)
     region, perimeter = full_reachable(sol_grid, R, C, portals, hr, hc)
     if perimeter:
-        errors.append("FAIL: horse can still reach the perimeter")
-    actual = sum(TILE_SCORE.get(sol_grid[r][c], 0) for r,c in region)
+        errors.append("FAIL: horse can reach the perimeter")
+
+    # Score matches
+    actual = sum(TILE_SCORE.get(sol_grid[r][c], 0) for r, c in region)
     if actual != claimed_score:
-        errors.append(f"FAIL: claimed {claimed_score}, actual is {actual}")
-    if not errors:
-        print(f"  ✓ VALID  |  walls: {walls_used}/{budget}  |  score: {actual}")
+        errors.append(f"FAIL: claimed {claimed_score}, actual score is {actual}")
+
+    if not errors and verbose:
+        new_walls = sum(sol_grid[r][c]==WALL and orig_grid[r][c]!=WALL
+                        for r in range(R) for c in range(C))
+        kept_walls = total_walls - new_walls
+        print(f"  ✓ VALID | score: {actual} | walls: {total_walls}/{budget} "
+              f"({new_walls} new + {kept_walls} kept)")
+
     return errors
+
+
+# ── Per-input solver ──────────────────────────────────────────────────────────
+
+def solve_input(name, text, out_dir=None, time_limit=20.0):
+    """
+    Parse, solve, verify, and write solution for one input.
+    Returns (score, valid, elapsed).
+    """
+    t0 = time.time()
+    try:
+        budget, R, C, grid, portals = parse_input(text)
+    except Exception as e:
+        print(f"  [PARSE ERROR] {e}")
+        return None, False, 0
+
+    hr, hc = find_horse(grid, R, C)
+    _, horse_free = full_reachable(grid, R, C, portals, hr, hc)
+
+    print(f"\n{'─'*55}")
+    print(f"  {name}  [{R}×{C}  budget={budget}  portals={len(portals)//2}]")
+
+    if not horse_free:
+        print("  NOTE: horse already enclosed before any walls — trivial input")
+
+    # Solve
+    best_region, best_score = solve(budget, R, C, grid, portals,
+                                    time_limit=time_limit, verbose=True)
+
+    if best_region is None:
+        print("  ERROR: no valid enclosure found")
+        return None, False, time.time()-t0
+
+    # Build solution grid
+    sol_grid = region_to_grid(best_region, grid, R, C)
+
+    # Verify
+    errors = verify(budget, R, C, grid, portals, sol_grid, best_score, verbose=True)
+    for e in errors:
+        print(f"  {e}")
+
+    # Write output
+    if not errors:
+        out_text = str(best_score) + '\n' + '\n'.join(''.join(row) for row in sol_grid)
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError:
+            out_dir = os.path.join(os.path.expanduser('~'), 'algobowl', 'outputs')
+            os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, name.replace('.txt', '_solution.txt'))
+        with open(out_path, 'w') as f:
+            f.write(out_text + '\n')
+        print(f"  → {out_path}")
+
+    return best_score, not errors, time.time()-t0
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def print_grid(grid, label=""):
-    if label: print(f"\n  {label}")
-    for row in grid:
-        print("  " + ''.join(row))
-
-
-# ── Helper functions for batch and verification ───────────────────────────────
-
-def solve_from_text(text, source_name, output_dir=None):
-    budget, R, C, grid, portals = parse_input(text)
-    print(f"\n{'='*60}")
-    print(f"  Source: {source_name}")
-    print(f"  Grid: {R}×{C}   Budget: {budget}   Portals: {len(portals)//2}")
-    print(f"{'='*60}")
-
-    hr, hc = find_horse(grid, R, C)
-    _, horse_free = full_reachable(grid, R, C, portals, hr, hc)
-    print(f"  INPUT: horse {'can' if horse_free else 'CANNOT'} reach perimeter")
-
-    print("\n  Solving...")
-    best_region, best_score = solve(budget, R, C, grid, portals, time_limit=20.0)
-
-    if best_region is None:
-        print("  ERROR: No valid enclosure found.")
-        return 1
-
-    sol_grid = region_to_grid(best_region, grid, R, C)
-    walls_used = sum(1 for r in range(R) for c in range(C)
-                     if sol_grid[r][c] == WALL)
-    print(f"\n  Score: {best_score}   Walls: {walls_used}/{budget}")
-    print("  Verifying...")
-    for e in verify(budget, R, C, grid, portals, sol_grid, best_score):
-        print(f"  {e}")
-
-    out_text = str(best_score) + '\n' + '\n'.join(''.join(row) for row in sol_grid)
-
-    if output_dir is None:
-        if source_name.endswith('.txt'):
-            out_path = source_name.replace('.txt', '_optimal.txt')
-        else:
-            out_path = source_name + '_optimal.txt'
-    else:
-        base_name = os.path.basename(source_name)
-        if base_name.endswith('.txt'):
-            base_name = base_name[:-4]
-        out_path = os.path.join(output_dir, base_name + '_optimal.txt')
-
-    with open(out_path, 'w') as f:
-        f.write(out_text + '\n')
-    print(f"  Written: {out_path}")
-    print(f"{'='*60}\n")
-    return 0
-
-
-def verify_from_text(input_text, output_text, source_name, output_name):
-    budget, R, C, grid, portals = parse_input(input_text)
-    print(f"\n{'='*60}")
-    print(f"  Input:  {source_name}")
-    print(f"  Output: {output_name}")
-    print(f"  Grid: {R}×{C}   Budget: {budget}   Portals: {len(portals)//2}")
-    print(f"{'='*60}")
-
-    lines = output_text.strip().splitlines()
-    claimed = int(lines[0])
-    sol_grid = [list(l) for l in lines[1:]]
-
-    print(f"\n  Verifying {output_name}...")
-    errors = verify(budget, R, C, grid, portals, sol_grid, claimed)
-    for e in errors:
-        print(f"  {e}")
-    if not errors:
-        print(f"{'='*60}\n")
-        return 0
-    print(f"{'='*60}\n")
-    return 1
-
 def main():
     args = sys.argv[1:]
     if not args:
-        print(__doc__)
+        print(__doc__); sys.exit(0)
+
+    check_only  = '--check' in args
+    args        = [a for a in args if a != '--check']
+    source      = args[0]
+    verify_file = args[1] if len(args) > 1 and not args[1].endswith('.zip') else None
+
+    # ── ZIP mode ─────────────────────────────────────────────────────────────
+    if source.endswith('.zip'):
+        print(f"Opening zip: {source}")
+        out_dir = os.path.join(os.getcwd(), 'outputs')
+        results = []
+        with zipfile.ZipFile(source) as zf:
+            txt_files = sorted(n for n in zf.namelist() if n.endswith('.txt'))
+            print(f"Found {len(txt_files)} input files")
+            for name in txt_files:
+                text = zf.read(name).decode('utf-8')
+                base = os.path.basename(name)
+                score, valid, elapsed = solve_input(base, text, out_dir=out_dir)
+                results.append((base, score, valid, elapsed))
+
+        print(f"\n{'='*55}")
+        print(f"  SUMMARY ({len(results)} inputs)")
+        print(f"{'─'*55}")
+        total_score = 0
+        for name, score, valid, elapsed in results:
+            status = '✓' if valid else '✗'
+            s = score if score is not None else 'ERR'
+            print(f"  {status}  {name:<30}  score={s:<8}  {elapsed:.1f}s")
+            if score: total_score += score
+        print(f"{'─'*55}")
+        print(f"  Total score: {total_score}")
         sys.exit(0)
 
-    check_only = '--check' in args
-    args = [a for a in args if a != '--check']
-    input_file = args[0]
-    output_file = args[1] if len(args) > 1 else None
-
-    if input_file.endswith('.zip'):
-        if output_file:
-            print("ZIP input does not support passing a single output file for verification.")
-            sys.exit(1)
-
-        zip_path = input_file
-        output_dir = os.path.splitext(zip_path)[0] + '_optimal_outputs'
-        os.makedirs(output_dir, exist_ok=True)
-
-        with zipfile.ZipFile(zip_path) as zf:
-            txt_names = sorted(
-                name for name in zf.namelist()
-                if not name.endswith('/') and name.lower().endswith('.txt')
-            )
-
-            if not txt_names:
-                print(f"No .txt files found in {zip_path}")
-                sys.exit(1)
-
-            exit_code = 0
-            for name in txt_names:
-                text = zf.read(name).decode('utf-8')
-                if check_only:
-                    budget, R, C, grid, portals = parse_input(text)
-                    print(f"\n{'='*60}")
-                    print(f"  Source: {name}")
-                    print(f"  Grid: {R}×{C}   Budget: {budget}   Portals: {len(portals)//2}")
-                    hr, hc = find_horse(grid, R, C)
-                    _, horse_free = full_reachable(grid, R, C, portals, hr, hc)
-                    print(f"  INPUT: horse {'can' if horse_free else 'CANNOT'} reach perimeter")
-                    print(f"{'='*60}\n")
-                else:
-                    result = solve_from_text(text, name, output_dir=output_dir)
-                    if result != 0:
-                        exit_code = result
-
-        if not check_only:
-            print(f"All outputs written to: {output_dir}")
-        sys.exit(exit_code)
-
-    with open(input_file) as f:
+    # ── Single file mode ─────────────────────────────────────────────────────
+    with open(source) as f:
         text = f.read()
 
     budget, R, C, grid, portals = parse_input(text)
-    print(f"\n{'='*60}")
-    print(f"  Grid: {R}×{C}   Budget: {budget}   Portals: {len(portals)//2}")
-    print(f"{'='*60}")
 
-    hr, hc = find_horse(grid, R, C)
-    _, horse_free = full_reachable(grid, R, C, portals, hr, hc)
-    print(f"  INPUT: horse {'can' if horse_free else 'CANNOT'} reach perimeter")
-
-    if check_only:
+    # Verify mode
+    if verify_file:
+        with open(verify_file) as f:
+            lines = f.read().strip().splitlines()
+        claimed = int(lines[0])
+        sol_grid = [list(l) for l in lines[1:]]
+        print(f"\nVerifying {verify_file}...")
+        for e in verify(budget, R, C, grid, portals, sol_grid, claimed):
+            print(f"  {e}")
         sys.exit(0)
 
-    if output_file:
-        with open(output_file) as f:
-            out_text = f.read()
-        exit_code = verify_from_text(text, out_text, input_file, output_file)
-        sys.exit(exit_code)
+    # Check mode
+    if check_only:
+        hr, hc = find_horse(grid, R, C)
+        _, free = full_reachable(grid, R, C, portals, hr, hc)
+        print(f"Horse {'CAN' if free else 'CANNOT'} reach perimeter")
+        sys.exit(0)
 
-    exit_code = solve_from_text(text, input_file)
-    sys.exit(exit_code)
+    # Solve mode
+    out_dir = os.path.join(os.getcwd(), 'outputs')
+    solve_input(os.path.basename(source), text, out_dir=out_dir)
+
 
 if __name__ == '__main__':
     main()
