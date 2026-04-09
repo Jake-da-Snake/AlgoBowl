@@ -1,4 +1,4 @@
-240
+244
 ####################################################################################################
 #..................................................................................................#
 #..................................................................................................#
@@ -42,8 +42,8 @@
 #........................................WWWWWWW...WWWWWWW.........................................#
 #..bbbcbb...cccbccb...cccccbb...cccccc..WbbcccccW.WcccccbbW..bbcbcb...ccccccc...ccbccbc...ccccccc..#
 #..bbcbbb...bccbbcb...cccbccb...cccbcc..WcccccbcW.WcccccbcW..bcbcbb...cbccbcb...cccccbc...ccccccc..#
-#..bcbbcc...cbbbccc...ccbbbcc...cccccc..WccccbccW.WcccccccW..cbbbbb...ccbcccc...cccccbc...bcccbcb..#
-#..bcbbbb...bbbcbbc...cbccccc...bbcccb..Wbcbcbbc.W.ccbcccbW..ccbbbc...ccccccb...cccccbc...ccccccc..#
+#..bcbbcc...cbbbccc...ccbbbcc...cccccc.W.ccccbcc.W.cccccccW..cbbbbb...ccbcccc...cccccbc...bcccbcb..#
+#..bcbbbb...bbbcbbc...cbccccc...bbcccb..Wbcbcbbc...ccbcccbW..ccbbbc...ccccccb...cccccbc...ccccccc..#
 #..ccbbbc...cbbbbcc...cccbccc...bcccbc..Wcccbcbc...cccccccW..bcbbbb...ccbcccc...ccccccc...ccccbcc..#
 #..bbbbbb...bbbbbcb...cccbcbc...bccccc..Wbcccbbc...ccccbccW..cbcbbb...ccbcccc...ccccccc...ccccbcc..#
 #..bbbbbb...bbcbcbb...bbccbbc...ccbccb..Wccbcccc...cccccbcW..ccbccc...ccccccc...ccccccb...cccbccc..#

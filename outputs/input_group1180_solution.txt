@@ -1,4 +1,4 @@
-267
+260
 .c###..b..##.##.a##p#.b#app####..c####b##p##..#.#####.abb.##.#..#b.b###.######.#b##.#####.b#..#b##.c
 ...ab.bb#...###..#.a#..b##b..p##.a#.###b..c....#...a#b#.#p.aab#p#aa..##b.c........aa.#..bb...#...b.a
 #b#c#b##b#.b...a#.a....ppp....##.#.b#.a.ab###.#b#b...a#.b....##bc#b.###b#bb#c...ca#.#b.##.#..##c.#bc
@@ -55,12 +55,12 @@ c###.bc.c#WW.WbW#.c.b.p.#a.a#b#a####c..##p####..#b.###b...p..cbba#c#.b.#.#..c..b
 ...#.#cbbWp.aWa###b####.##ab.a.#..b#pb.b#p.bb#a...b.b.ca.ab.#b...c##.#.#.#b##.b####..###ac#.a.#p..a.
 ##b.#b.b#W.babb#####b#ab..#..ab.#.c...c##..b##baa..cb.##a#pcb#..#b####...bc##c..a#.....###a#.####...
 b.#....b#Wb##WaWW###W.b##....c..c..a#a.caa##a##.b##.#.#.b#..pW####b#b.#b..a..bbb#b.ab...####.#bbp.a#
-#ba.c.#b#ab##Wb.cc.caWa#bpp#acc..a..a#b......#b.bc#.#b###b.#Wb.Wa.abb.a###.ac#.#.##b#bbbc#..##.p#.c#
+#ba.c.#b#ab##Wb.cc.caWa#bpp#acc..a..a#b......#b.bc#.#b###b.#WbW.a.abb.a###.ac#.#.##b#bbbc#..##.p#.c#
 .ac..b.b##c##.W#a#c.#W.b##p..c#.##.b..b####...c...pc#a##..ac#ba##.#.b.bb####..#...#.b#..##c.b##..##.
-.##a..#.#b##..b#.##.WcW.W.#...##b#cab##..c.a.bb..#a#.b.ac.#.##c#cc..b.a#cc#cc.#..#.#..cb###.a.c..##.
+.##a..#.#b##..b#W##.WcW.W.#...##b#cab##..c.a.bb..#a#.b.ac.#.##c#cc..b.a#cc#cc.#..#.#..cb###.a.c..##.
 ####a..p.c#a.#p.W.aaacW#b##.#.##.a##.pb..ca###...apa##c##.###c.####c.....b.a#abb.b....aa.####.####cb
-c###..##b#..ap#.W.#Wpb.ba#.##..#b#..bp#cb#.#.##.#b..ab#Wc##bc.abpb##....#a.#b..#b#b#.c#...pb.c.c####
-###ac.....a.b.a.#.#.WW######.a..b.b.#.##a.#b.##..c....#W.W#b#W#.##a##.bb#..c.c.#..#c..b#..a.#.##p...
+c###..##b#..ap#.W.#Wpb.ba#.##..#b#..bp#cb#.#.##.#b..ab#.c##bc.abpb##....#a.#b..#b#b#.c#...pb.c.c####
+###ac.....a.b.a.#.#.WW######.a..b.b.#.##a.#b.##..c....#.WW#b#W#.##a##.bb#..c.c.#..#c..b#..a.#.##p...
 ##...b.....#b##b#HW##b.#.#bac.#.#c#a#.##..#b##...c.#...WbcaaWb#c#.###.a#.......ca.c.bcc..##c#ca#..bp
 .a...c.#cc###b#Wbcac##.#b#..c#.#.b#.b.b##..p.cbcb###.#c###Wba#pb#.##.b###...c.##.b#c#.cb#.#ca#...b..
 c.#a.#.#a.a###.bb#W#.c#..#.....##.#.#.ca###b#abb####ba#bcbWa#bb#.bc.c###b.#...c.a.#b#a.#.c#.ab.#.#..
